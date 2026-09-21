@@ -123,7 +123,7 @@ export default function (pi: ExtensionAPI) {
 							const lines = target.render(width);
 							if (!waiting || lines.length < 2) return lines;
 							const blue = (line: string) =>
-								line.replace(/─+/g, (segment) => ctx.ui.theme.fg("info", segment));
+								line.replace(/─+/g, (segment) => ctx.ui.theme.fg("borderAccent", segment));
 							lines[0] = blue(lines[0]!);
 							lines[lines.length - 1] = blue(lines[lines.length - 1]!);
 							return lines;
