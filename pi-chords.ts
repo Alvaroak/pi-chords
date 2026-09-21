@@ -36,8 +36,23 @@ const ESC = "\x1b";
 const STATUS_KEY = "pi-chords";
 
 export default function (pi: ExtensionAPI) {
+	let listenerRegistered = false;
+
+	pi.registerCommand("chords-status", {
+		description: "Report whether the Ctrl+X global terminal listener is active",
+		handler: async (_args, ctx) => {
+			ctx.ui.notify(
+				listenerRegistered
+					? "pi-chords: global Ctrl+X listener is active. Press Ctrl+X; footer will show C-x- waiting for key."
+					: "pi-chords: extension loaded, but the listener is not registered. Run /reload once.",
+				listenerRegistered ? "info" : "warning",
+			);
+		},
+	});
+
 	pi.on("session_start", (_event, ctx) => {
 		let pending = false;
+		listenerRegistered = true;
 
 		ctx.ui.onTerminalInput((data) => {
 			if (!pending) {
