@@ -81,8 +81,10 @@ export default function (pi: ExtensionAPI) {
 				}
 
 				if (matchesKey(data, "?")) {
-					void showPalette(ctx, pi);
-					return { consume: true };
+					// Reuse pi's native slash autocomplete: it is scrollable,
+					// paginated, searchable as the user types, and is rendered by the
+					// installed centered-slash-menu overlay when that extension is on.
+					return { data: "/" };
 				}
 
 				if (data.length === 1 && data.charCodeAt(0) >= 32) {
