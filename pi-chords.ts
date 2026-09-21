@@ -138,10 +138,11 @@ class ChordEditor extends CustomEditor {
 const CHORD_FACTORY = "__piChordsBase";
 
 export default function (pi: ExtensionAPI) {
-	// resources_discover runs after all session_start handlers at startup and
-	// again on /reload. Installing here means a reload activates new chord code
-	// immediately instead of requiring a full pi restart.
-	pi.on("resources_discover", (_event, ctx) => {
+	let installed = false;
+
+	const install = (ctx: any) => {
+		if (installed) return;
+		installed = true;
 		const current = ctx.ui.getEditorComponent?.() as any;
 		// A reload may see our previous factory. Unwrap it so we don't stack
 		// ChordEditor around ChordEditor on every /reload.
@@ -150,5 +151,12 @@ export default function (pi: ExtensionAPI) {
 			new ChordEditor(tui, theme, kb, { base: previous?.(tui, theme, kb) }, { pi, ui: ctx.ui });
 		factory[CHORD_FACTORY] = previous;
 		ctx.ui.setEditorComponent(factory);
-	});
+	};
+
+	// session_start is the reliable startup point: centered-slash-menu has
+	// already installed its editor and we wrap it afterwards.
+	pi.on("session_start", (_event, ctx) => install(ctx));
+	// If pi invokes discovery after a reload, update immediately too. The guard
+	// makes the ordinary startup sequence a single installation.
+	pi.on("resources_discover", (_event, ctx) => install(ctx));
 }
