@@ -41,6 +41,32 @@ const ACTION_CHORDS: Array<[KeyId, string]> = [
 // Commands requiring arguments are prefilled rather than submitted.
 const PREFILL_CHORDS: Array<[KeyId, string]> = [["shift+d", "/cd "]];
 
+const CHORD_HELP: Array<{ key: string; label: string; command?: string }> = [
+	{ key: "m", label: "Model picker", command: "/model" },
+	{ key: "M", label: "Scoped models", command: "/scoped-models" },
+	{ key: "t", label: "Thinking level", command: "/thinking" },
+	{ key: "o", label: "Toggle tool output" },
+	{ key: "z", label: "Toggle thinking output" },
+	{ key: "n", label: "New session", command: "/new" },
+	{ key: "r", label: "Reload extensions and resources", command: "/reload" },
+	{ key: "E", label: "Resume session", command: "/resume" },
+	{ key: "s", label: "Session tree", command: "/tree" },
+	{ key: "f", label: "Fork session", command: "/fork" },
+	{ key: "c", label: "Copy last assistant message", command: "/copy" },
+	{ key: "C", label: "Clone session", command: "/clone" },
+	{ key: "p", label: "Compact context", command: "/compact" },
+	{ key: "u", label: "Usage overlay", command: "/usage" },
+	{ key: "k", label: "Keybindings overlay", command: "/keys" },
+	{ key: "g", label: "Skill groups", command: "/skillgroups" },
+	{ key: "h", label: "Handoff session", command: "/handoff" },
+	{ key: "b", label: "Toggle bash mode", command: "/bash-mode" },
+	{ key: "d", label: "Pick repository", command: "/cdr" },
+	{ key: "D", label: "Change directory", command: "/cd " },
+	{ key: "e", label: "Export session", command: "/export" },
+	{ key: "q", label: "Quit pi", command: "/quit" },
+	{ key: "?", label: "Show this searchable chord list" },
+];
+
 const STATUS_KEY = "pi-chords";
 
 export default function (pi: ExtensionAPI) {
@@ -81,10 +107,8 @@ export default function (pi: ExtensionAPI) {
 				}
 
 				if (matchesKey(data, "?")) {
-					// Reuse pi's native slash autocomplete: it is scrollable,
-					// paginated, searchable as the user types, and is rendered by the
-					// installed centered-slash-menu overlay when that extension is on.
-					return { data: "/" };
+					void showChordHelp(ctx);
+					return { consume: true };
 				}
 
 				if (data.length === 1 && data.charCodeAt(0) >= 32) {
@@ -149,6 +173,21 @@ export default function (pi: ExtensionAPI) {
 			});
 		});
 	});
+}
+
+async function showChordHelp(ctx: any): Promise<void> {
+	const rows = CHORD_HELP.map(
+		(entry) => `C-x ${entry.key.padEnd(2)}  ${entry.label}${entry.command ? `  ${entry.command}` : ""}`,
+	);
+	const selected = await ctx.ui.select("Ctrl+X commands — type to search", rows);
+	if (!selected) return;
+	const entry = CHORD_HELP[rows.indexOf(selected)];
+	if (!entry?.command) {
+		ctx.ui.notify(`${selected.trim()} — use that chord to run it`, "info");
+		return;
+	}
+	ctx.ui.setEditorText(entry.command);
+	ctx.ui.notify("Command loaded — press Enter to run it", "info");
 }
 
 async function showPalette(ctx: any, pi: ExtensionAPI, hint = ""): Promise<void> {
