@@ -14,13 +14,13 @@ const COMMAND_CHORDS: Array<[KeyId, string]> = [
 	["shift+m", "/scoped-models"],
 	["t", "/thinking"],
 	["n", "/new"],
-	["r", "/resume"],
+	["r", "/reload"],
 	["s", "/tree"],
 	["f", "/fork"],
 	["c", "/copy"],
 	["shift+c", "/clone"],
 	["p", "/compact"],
-	["shift+e", "/reload"],
+	["shift+e", "/resume"],
 	["u", "/usage"],
 	["k", "/keys"],
 	["g", "/skillgroups"],
@@ -37,6 +37,9 @@ const ACTION_CHORDS: Array<[KeyId, string]> = [
 	["o", "\x1bo"], // app.tools.expand (alt+o)
 	["z", "\x1bz"], // app.thinking.toggle (alt+z)
 ];
+
+// Commands requiring arguments are prefilled rather than submitted.
+const PREFILL_CHORDS: Array<[KeyId, string]> = [["shift+d", "/cd "]];
 
 const STATUS_KEY = "pi-chords";
 
@@ -70,6 +73,12 @@ export default function (pi: ExtensionAPI) {
 
 				const actionKey = ACTION_CHORDS.find(([key]) => matchesKey(data, key))?.[1];
 				if (actionKey) return { data: actionKey };
+
+				const prefill = PREFILL_CHORDS.find(([key]) => matchesKey(data, key))?.[1];
+				if (prefill) {
+					ctx.ui.setEditorText(prefill);
+					return { consume: true };
+				}
 
 				if (matchesKey(data, "?")) {
 					void showPalette(ctx, pi);
@@ -141,14 +150,21 @@ export default function (pi: ExtensionAPI) {
 }
 
 async function showPalette(ctx: any, pi: ExtensionAPI, hint = ""): Promise<void> {
-	const commands = pi.getCommands().filter((command) => !hint || command.name.startsWith(hint));
-	const options = commands.map((command) => `/${command.name} - ${command.description ?? ""}`);
+	const names = [
+		...new Set(
+			pi
+				.getCommands()
+				.map((command) => command.name)
+				.filter((name) => !hint || name.toLowerCase().startsWith(hint.toLowerCase())),
+		),
+	];
+	const options = names.map((name) => `/${name}`);
 	if (options.length === 0) {
 		ctx.ui.notify(`No command starts with "${hint}"`, "warning");
 		return;
 	}
-	const selected = await ctx.ui.select(hint ? `C-x → /${hint}*` : "C-x → command palette", options);
+	const selected = await ctx.ui.select(hint ? `C-x → /${hint}*` : "C-x → command", options);
 	if (!selected) return;
-	ctx.ui.setEditorText(selected.split(" - ")[0]);
+	ctx.ui.setEditorText(selected);
 	ctx.ui.notify("Command loaded — press Enter to run it", "info");
 }
