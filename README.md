@@ -7,11 +7,11 @@ Press `Ctrl+X`, then a second key. Pi highlights the prompt borders while waitin
 ## Install
 
 ```bash
+# Git repository (recommended)
+pi install git:github.com/Alvaroak/pi-chords@v0.1.0
+
 # Local checkout
 pi install /absolute/path/to/pi-chords
-
-# Git repository
-pi install git:github.com/USER/pi-chords@v0.1.0
 
 # npm, once published
 pi install npm:@alvaroak/pi-chords@0.1.0
