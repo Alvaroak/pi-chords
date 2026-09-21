@@ -6,10 +6,13 @@
  * terminal-input listener.
  */
 
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { CustomEditor, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { matchesKey, type KeyId } from "@earendil-works/pi-tui";
 
-const COMMAND_CHORDS: Array<[KeyId, string]> = [
+const DEFAULT_COMMAND_CHORDS: Array<[KeyId, string]> = [
 	["m", "/model"],
 	["shift+m", "/scoped-models"],
 	["t", "/thinking"],
@@ -31,12 +34,29 @@ const COMMAND_CHORDS: Array<[KeyId, string]> = [
 	["q", "/quit"],
 ];
 
-// o/z are app display actions rather than slash commands. Re-emit the existing
-// native bindings after consuming the chord's second key.
+// o/z are app display actions rather than slash commands. Invoke the editor's
+// registered action handlers directly so this package does not depend on any
+// user's Alt or Ctrl bindings.
 const ACTION_CHORDS: Array<[KeyId, string]> = [
-	["o", "\x1bo"], // app.tools.expand (alt+o)
-	["z", "\x1bz"], // app.thinking.toggle (alt+z)
+	["o", "app.tools.expand"],
+	["z", "app.thinking.toggle"],
 ];
+
+const BUILTIN_COMMANDS = new Set([
+	"model",
+	"scoped-models",
+	"thinking",
+	"new",
+	"reload",
+	"resume",
+	"tree",
+	"fork",
+	"copy",
+	"clone",
+	"compact",
+	"export",
+	"quit",
+]);
 
 // Commands requiring arguments are prefilled rather than submitted.
 const PREFILL_CHORDS: Array<[KeyId, string]> = [["shift+d", "/cd "]];
@@ -109,8 +129,10 @@ const CTRL_HELP: Array<[string, string]> = [
 const STATUS_KEY = "pi-chords";
 
 export default function (pi: ExtensionAPI) {
+	const { commandChords, configError } = loadCommandChords();
 	let waiting = false;
 	let cancelWait: (() => void) | undefined;
+	let activeEditor: any;
 
 	pi.registerShortcut("ctrl+x", {
 		description: "Start Ctrl+X command chord",
@@ -130,14 +152,23 @@ export default function (pi: ExtensionAPI) {
 					return { consume: true };
 				}
 
-				const command = COMMAND_CHORDS.find(([key]) => matchesKey(data, key))?.[1];
+				const command = commandChords.find(([key]) => matchesKey(data, key))?.[1];
 				if (command) {
+					if (!isCommandAvailable(pi, command)) {
+						ctx.ui.notify(`${command} is not installed`, "warning");
+						return { consume: true };
+					}
 					ctx.ui.setEditorText(command);
 					return { data: "\r" };
 				}
 
-				const actionKey = ACTION_CHORDS.find(([key]) => matchesKey(data, key))?.[1];
-				if (actionKey) return { data: actionKey };
+				const action = ACTION_CHORDS.find(([key]) => matchesKey(data, key))?.[1];
+				if (action) {
+					const handler = activeEditor?.actionHandlers?.get(action);
+					if (typeof handler === "function") handler();
+					else ctx.ui.notify(`${action} is unavailable in this editor`, "warning");
+					return { consume: true };
+				}
 
 				const prefill = PREFILL_CHORDS.find(([key]) => matchesKey(data, key))?.[1];
 				if (prefill) {
@@ -146,7 +177,7 @@ export default function (pi: ExtensionAPI) {
 				}
 
 				if (matchesKey(data, "?")) {
-					void showChordHelp(ctx);
+					void showChordHelp(ctx, pi, commandChords);
 					return { consume: true };
 				}
 
@@ -173,10 +204,12 @@ export default function (pi: ExtensionAPI) {
 		description: "Report Ctrl+X chord shortcut status",
 		handler: async (_args, ctx) => {
 			ctx.ui.notify(
-				waiting
-					? "pi-chords: Ctrl+X shortcut fired; waiting for the second key."
-					: "pi-chords: native Ctrl+X shortcut is registered and idle.",
-				"info",
+				configError
+					? `pi-chords: active with config warning: ${configError}`
+					: waiting
+						? "pi-chords: Ctrl+X shortcut fired; waiting for the second key."
+						: "pi-chords: native Ctrl+X shortcut is registered and idle.",
+				configError ? "warning" : "info",
 			);
 		},
 	});
@@ -190,6 +223,7 @@ export default function (pi: ExtensionAPI) {
 			const editor = previous
 				? previous(tui, theme, keybindings)
 				: new CustomEditor(tui, theme, keybindings);
+			activeEditor = editor;
 			return new Proxy(editor, {
 				get(target, property, receiver) {
 					if (property === "render") {
@@ -214,12 +248,65 @@ export default function (pi: ExtensionAPI) {
 	});
 }
 
-async function showChordHelp(ctx: any): Promise<void> {
+function loadCommandChords(): { commandChords: Array<[KeyId, string]>; configError?: string } {
+	const byKey = new Map<string, string>(DEFAULT_COMMAND_CHORDS);
+	const path = join(homedir(), ".pi", "agent", "pi-chords.json");
+	if (!existsSync(path)) return { commandChords: [...byKey] as Array<[KeyId, string]> };
+
+	try {
+		const parsed = JSON.parse(readFileSync(path, "utf8")) as { commands?: Record<string, unknown> };
+		for (const [displayKey, value] of Object.entries(parsed.commands ?? {})) {
+			if (["?", "o", "z", "D"].includes(displayKey)) {
+				throw new Error(`key "${displayKey}" is reserved by pi-chords`);
+			}
+			const key = toKeyId(displayKey);
+			if (!key) throw new Error(`invalid key "${displayKey}"`);
+			if (value === null) byKey.delete(key);
+			else if (typeof value === "string" && value.startsWith("/")) byKey.set(key, value);
+			else throw new Error(`binding "${displayKey}" must be a slash command or null`);
+		}
+		return { commandChords: [...byKey] as Array<[KeyId, string]> };
+	} catch (error) {
+		return {
+			commandChords: [...byKey] as Array<[KeyId, string]>,
+			configError: error instanceof Error ? error.message : String(error),
+		};
+	}
+}
+
+function toKeyId(key: string): KeyId | undefined {
+	if (/^[a-z0-9]$/.test(key)) return key as KeyId;
+	if (/^[A-Z]$/.test(key)) return `shift+${key.toLowerCase()}` as KeyId;
+	return undefined;
+}
+
+function displayKey(key: KeyId): string {
+	return key.startsWith("shift+") && key.length === 7 ? key.slice(-1).toUpperCase() : key;
+}
+
+function isCommandAvailable(pi: ExtensionAPI, command: string): boolean {
+	const name = command.slice(1).split(/\s/, 1)[0]!;
+	return BUILTIN_COMMANDS.has(name) || pi.getCommands().some((candidate) => candidate.name === name);
+}
+
+async function showChordHelp(
+	ctx: any,
+	pi: ExtensionAPI,
+	commandChords: Array<[KeyId, string]>,
+): Promise<void> {
+	const configured = new Map(commandChords.map(([key, command]) => [displayKey(key), command]));
+	const help = CHORD_HELP.filter((entry) => !entry.command || configured.get(entry.key) === entry.command);
+	for (const [key, command] of configured) {
+		if (!help.some((entry) => entry.key === key)) help.push({ key, label: "Custom command", command });
+	}
 	const chordRows = new Map(
-		CHORD_HELP.map((entry) => [
-			`C-x ${entry.key.padEnd(2)}  ${entry.label}${entry.command ? `  ${entry.command}` : ""}`,
-			entry,
-		]),
+		help.map((entry) => {
+			const unavailable = entry.command && !isCommandAvailable(pi, entry.command) ? "  [not installed]" : "";
+			return [
+				`C-x ${entry.key.padEnd(2)}  ${entry.label}${entry.command ? `  ${entry.command}` : ""}${unavailable}`,
+				entry,
+			] as const;
+		}),
 	);
 	const rows = [
 		"── Ctrl+X commands ──",
@@ -234,6 +321,10 @@ async function showChordHelp(ctx: any): Promise<void> {
 	const entry = chordRows.get(selected);
 	if (!entry?.command) {
 		ctx.ui.notify(`${selected.trim()} — reference entry`, "info");
+		return;
+	}
+	if (!isCommandAvailable(pi, entry.command)) {
+		ctx.ui.notify(`${entry.command} is not installed`, "warning");
 		return;
 	}
 	ctx.ui.setEditorText(entry.command);
