@@ -1,10 +1,9 @@
 /**
  * pi-chords — Ctrl+X command prefix.
  *
- * This intentionally uses ctx.ui.onTerminalInput(), not a CustomEditor:
- * input listeners run before pi routes a key to the transcript, selector, or
- * currently focused editor component. Ctrl+X therefore has one reliable entry
- * point across normal and fullscreen TUI modes.
+ * Ctrl+X uses pi.registerShortcut(), the same native shortcut dispatcher that
+ * previously handled app.message.copy. Only the second key uses a temporary
+ * terminal-input listener.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -35,63 +34,70 @@ const CHORDS: Record<string, string> = {
 const STATUS_KEY = "pi-chords";
 
 export default function (pi: ExtensionAPI) {
-	let listenerRegistered = false;
+	let waiting = false;
+	let cancelWait: (() => void) | undefined;
 
-	pi.registerCommand("chords-status", {
-		description: "Report whether the Ctrl+X global terminal listener is active",
-		handler: async (_args, ctx) => {
-			ctx.ui.notify(
-				listenerRegistered
-					? "pi-chords: global Ctrl+X listener is active. Press Ctrl+X; footer will show C-x- waiting for key."
-					: "pi-chords: extension loaded, but the listener is not registered. Run /reload once.",
-				listenerRegistered ? "info" : "warning",
-			);
+	pi.registerShortcut("ctrl+x", {
+		description: "Start Ctrl+X command chord",
+		handler: async (ctx) => {
+			// Repeating Ctrl+X cancels the existing wait.
+			if (waiting) {
+				cancelWait?.();
+				return;
+			}
+
+			waiting = true;
+			ctx.ui.setStatus(STATUS_KEY, "C-x- waiting for key");
+
+			const unsubscribe = ctx.ui.onTerminalInput((data) => {
+				finish();
+
+				if (matchesKey(data, "escape") || matchesKey(data, "ctrl+x")) {
+					return { consume: true };
+				}
+
+				const command = CHORDS[data];
+				if (command) {
+					ctx.ui.setEditorText(command);
+					// One raw Enter runs through pi's native interactive command path.
+					return { data: "\r" };
+				}
+
+				if (data === "?") {
+					void showPalette(ctx, pi);
+					return { consume: true };
+				}
+
+				if (data.length === 1 && data.charCodeAt(0) >= 32) {
+					void showPalette(ctx, pi, data);
+					return { consume: true };
+				}
+
+				return;
+			});
+
+			function finish() {
+				if (!waiting) return;
+				waiting = false;
+				ctx.ui.setStatus(STATUS_KEY, undefined);
+				unsubscribe();
+				cancelWait = undefined;
+			}
+
+			cancelWait = finish;
 		},
 	});
 
-	pi.on("session_start", (_event, ctx) => {
-		let pending = false;
-		listenerRegistered = true;
-
-		ctx.ui.onTerminalInput((data) => {
-			if (!pending) {
-				// matchesKey supports both legacy Ctrl bytes and the Kitty keyboard
-				// protocol emitted by WezTerm. Comparing with "\x18" only worked in
-				// the synthetic test harness, not in the user's terminal.
-				if (!matchesKey(data, "ctrl+x")) return;
-				pending = true;
-				ctx.ui.setStatus(STATUS_KEY, "C-x- waiting for key");
-				return { consume: true };
-			}
-
-			pending = false;
-			ctx.ui.setStatus(STATUS_KEY, undefined);
-
-			// Esc or a repeated prefix cancels. Never leak either keystroke to pi.
-			if (matchesKey(data, "escape") || matchesKey(data, "ctrl+x")) return { consume: true };
-
-			const command = CHORDS[data];
-			if (command) {
-				// A multi-character terminal event is paste, not typing. Set the
-				// command through the editor API, then pass a *single* raw Enter key
-				// through pi's ordinary interactive dispatcher for built-ins (/model).
-				ctx.ui.setEditorText(command);
-				return { data: "\r" };
-			}
-
-			if (data === "?") {
-				void showPalette(ctx, pi);
-				return { consume: true };
-			}
-
-			// An unknown printable chord opens the command palette. Controls retain
-			// their ordinary behavior after cancelling the prefix.
-			if (data.length === 1 && data.charCodeAt(0) >= 32) {
-				void showPalette(ctx, pi, data);
-				return { consume: true };
-			}
-			return;
-		});
+	pi.registerCommand("chords-status", {
+		description: "Report Ctrl+X chord shortcut status",
+		handler: async (_args, ctx) => {
+			ctx.ui.notify(
+				waiting
+					? "pi-chords: Ctrl+X shortcut fired; waiting for the second key."
+					: "pi-chords: native Ctrl+X shortcut is registered and idle.",
+				"info",
+			);
+		},
 	});
 }
 
@@ -104,8 +110,6 @@ async function showPalette(ctx: any, pi: ExtensionAPI, hint = ""): Promise<void>
 	}
 	const selected = await ctx.ui.select(hint ? `C-x → /${hint}*` : "C-x → command palette", options);
 	if (!selected) return;
-	// The selected text is placed in the editor instead of sent as an extension
-	// message: pressing Enter uses pi's interactive dispatcher for built-ins.
 	ctx.ui.setEditorText(selected.split(" - ")[0]);
 	ctx.ui.notify("Command loaded — press Enter to run it", "info");
 }
