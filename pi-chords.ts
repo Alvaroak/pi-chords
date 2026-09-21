@@ -8,6 +8,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { matchesKey } from "@earendil-works/pi-tui";
 
 const CHORDS: Record<string, string> = {
 	m: "/model",
@@ -31,8 +32,6 @@ const CHORDS: Record<string, string> = {
 	q: "/quit",
 };
 
-const PREFIX = "\x18"; // Ctrl+X
-const ESC = "\x1b";
 const STATUS_KEY = "pi-chords";
 
 export default function (pi: ExtensionAPI) {
@@ -56,7 +55,10 @@ export default function (pi: ExtensionAPI) {
 
 		ctx.ui.onTerminalInput((data) => {
 			if (!pending) {
-				if (data !== PREFIX) return;
+				// matchesKey supports both legacy Ctrl bytes and the Kitty keyboard
+				// protocol emitted by WezTerm. Comparing with "\x18" only worked in
+				// the synthetic test harness, not in the user's terminal.
+				if (!matchesKey(data, "ctrl+x")) return;
 				pending = true;
 				ctx.ui.setStatus(STATUS_KEY, "C-x- waiting for key");
 				return { consume: true };
@@ -66,7 +68,7 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.setStatus(STATUS_KEY, undefined);
 
 			// Esc or a repeated prefix cancels. Never leak either keystroke to pi.
-			if (data === ESC || data === PREFIX) return { consume: true };
+			if (matchesKey(data, "escape") || matchesKey(data, "ctrl+x")) return { consume: true };
 
 			const command = CHORDS[data];
 			if (command) {
