@@ -1,27 +1,14 @@
 /**
- * pi-chords — Ctrl+X as a command prefix (Emacs C-x style).
+ * pi-chords — Ctrl+X command prefix.
  *
- * Press Ctrl+X, the editor border shows "C-x-", press the second key:
- *   C-x m /model · C-x t /thinking · C-x n /new · C-x r /resume · C-x s /tree
- *   C-x f /fork · C-x c /copy · C-x u /usage · C-x k /keys · C-x g /skillgroups
- *   C-x h /handoff · C-x b /bash-mode · C-x d /cdr · C-x e /export
- *   C-x p /compact · C-x M /scoped-models · C-x C /clone · C-x E /reload
- *   C-x q /quit · C-x ? command palette (all /commands via picker)
- *   C-x <other printable> → same palette filtered on that command name
- *
- * Esc or Ctrl+X again cancels a pending chord. Everything else flows through
- * super.handleInput(), so app keybindings and previously composed custom
- * editors (e.g. centered-slash-menu) keep working.
- *
- * Install: pi loads it via ~/.pi/agent/extensions/pi-chords.ts (symlink into
- * ~/repos/pi/pi-chords/pi-chords.ts).
+ * This intentionally uses ctx.ui.onTerminalInput(), not a CustomEditor:
+ * input listeners run before pi routes a key to the transcript, selector, or
+ * currently focused editor component. Ctrl+X therefore has one reliable entry
+ * point across normal and fullscreen TUI modes.
  */
 
-import { CustomEditor, type ExtensionAPI, type SlashCommandInfo } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-// Second key (raw char as it reaches the terminal) -> slash command to run.
-// No leading slash, no args. Capitals mean "hold shift on the second key".
 const CHORDS: Record<string, string> = {
 	m: "/model",
 	M: "/scoped-models",
@@ -44,119 +31,64 @@ const CHORDS: Record<string, string> = {
 	q: "/quit",
 };
 
-const PENDING_LABEL = " C-x- ";
-const ENTER = "\r";
-
-class ChordEditor extends CustomEditor {
-	private pending = false;
-
-	private uiNonInteractiveRun: Pick<ExtensionAPI, "sendUserMessage" | "getCommands">;
-	private ui: any;
-
-	constructor(tui: any, theme: any, keybindings: any, opts: { base?: unknown } = {}, services: any = {}) {
-		// 4th arg opts matches the composed-editor signature: { base: prevFactory(...) }
-		super(tui, theme, keybindings, { base: opts.base });
-		// eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-		this.uiNonInteractiveRun = services.pi;
-		this.ui = services.ui;
-	}
-
-	handleInput(data: string): void {
-		// Pending chord: consume the second key, or hand it back untouched.
-		if (this.pending) {
-			this.pending = false;
-			// Ctrl+X again or Esc cancels without running anything.
-			if (data === "\x18" || data === "\x1b") return;
-			const cmd = CHORDS[data];
-			if (cmd) {
-				this.runSlash(cmd);
-				return;
-			}
-			if (data === "?") {
-				this.palette();
-				return;
-			}
-			// Wrong printable second key: treat it as the first letter of a
-			// command and open the palette pre-filtered on it.
-			if (data.length === 1 && data.charCodeAt(0) >= 32) {
-				this.palette(data);
-				return;
-			}
-			super.handleInput(data);
-			return;
-		}
-
-		if (data === "\x18") {
-			this.pending = true;
-			return;
-		}
-		super.handleInput(data);
-	}
-
-	render(width: number): string[] {
-		const lines = super.render(width);
-		if (!this.pending || lines.length === 0) return lines;
-		const last = lines.length - 1;
-		if (visibleWidth(lines[last]!) >= PENDING_LABEL.length) {
-			lines[last] = truncateToWidth(lines[last]!, width - PENDING_LABEL.length, "") + PENDING_LABEL;
-		}
-		return lines;
-	}
-
-	private runSlash(cmd: string): void {
-		// Preferred: invoke the app's own submit handler — identical to the user
-		// typing the command and pressing Enter, so built-ins (/model, /new, …)
-		// resolve exactly as interactive input.
-		const submit = (this as any).onSubmit as ((text: string) => void) | undefined;
-		if (typeof submit === "function") {
-			submit(cmd);
-			return;
-		}
-		// Non-TUI fallback (RPC/JSON modes): command pipeline dispatch.
-		this.uiNonInteractiveRun.sendUserMessage(cmd, { expandPromptTemplates: true });
-	}
-
-	private async palette(hint = ""): Promise<void> {
-		const commands: SlashCommandInfo[] = this.uiNonInteractiveRun.getCommands();
-		const filtered = hint ? commands.filter((c) => c.name.startsWith(hint)) : commands;
-		const items: string[] = filtered.map((c) => `/${c.name} - ${c.description ?? ""}`);
-		if (items.length === 0) {
-			this.ui.notify(`No command matches "${hint}"`, "warning");
-			return;
-		}
-		const selected = await this.ui.select(
-			hint ? `C-x → /${hint}*` : "C-x → command palette",
-			items,
-		);
-		if (selected && !selected.startsWith("---")) {
-			const name = selected.split(" - ")[0];
-			this.uiNonInteractiveRun.sendUserMessage(name);
-		}
-	}
-}
-
-const CHORD_FACTORY = "__piChordsBase";
+const PREFIX = "\x18"; // Ctrl+X
+const ESC = "\x1b";
+const STATUS_KEY = "pi-chords";
 
 export default function (pi: ExtensionAPI) {
-	let installed = false;
+	pi.on("session_start", (_event, ctx) => {
+		let pending = false;
 
-	const install = (ctx: any) => {
-		if (installed) return;
-		installed = true;
-		const current = ctx.ui.getEditorComponent?.() as any;
-		// A reload may see our previous factory. Unwrap it so we don't stack
-		// ChordEditor around ChordEditor on every /reload.
-		const previous = current?.[CHORD_FACTORY] ?? current;
-		const factory: any = (tui: any, theme: any, kb: any) =>
-			new ChordEditor(tui, theme, kb, { base: previous?.(tui, theme, kb) }, { pi, ui: ctx.ui });
-		factory[CHORD_FACTORY] = previous;
-		ctx.ui.setEditorComponent(factory);
-	};
+		ctx.ui.onTerminalInput((data) => {
+			if (!pending) {
+				if (data !== PREFIX) return;
+				pending = true;
+				ctx.ui.setStatus(STATUS_KEY, "C-x- waiting for key");
+				return { consume: true };
+			}
 
-	// session_start is the reliable startup point: centered-slash-menu has
-	// already installed its editor and we wrap it afterwards.
-	pi.on("session_start", (_event, ctx) => install(ctx));
-	// If pi invokes discovery after a reload, update immediately too. The guard
-	// makes the ordinary startup sequence a single installation.
-	pi.on("resources_discover", (_event, ctx) => install(ctx));
+			pending = false;
+			ctx.ui.setStatus(STATUS_KEY, undefined);
+
+			// Esc or a repeated prefix cancels. Never leak either keystroke to pi.
+			if (data === ESC || data === PREFIX) return { consume: true };
+
+			const command = CHORDS[data];
+			if (command) {
+				// A multi-character terminal event is paste, not typing. Set the
+				// command through the editor API, then pass a *single* raw Enter key
+				// through pi's ordinary interactive dispatcher for built-ins (/model).
+				ctx.ui.setEditorText(command);
+				return { data: "\r" };
+			}
+
+			if (data === "?") {
+				void showPalette(ctx, pi);
+				return { consume: true };
+			}
+
+			// An unknown printable chord opens the command palette. Controls retain
+			// their ordinary behavior after cancelling the prefix.
+			if (data.length === 1 && data.charCodeAt(0) >= 32) {
+				void showPalette(ctx, pi, data);
+				return { consume: true };
+			}
+			return;
+		});
+	});
+}
+
+async function showPalette(ctx: any, pi: ExtensionAPI, hint = ""): Promise<void> {
+	const commands = pi.getCommands().filter((command) => !hint || command.name.startsWith(hint));
+	const options = commands.map((command) => `/${command.name} - ${command.description ?? ""}`);
+	if (options.length === 0) {
+		ctx.ui.notify(`No command starts with "${hint}"`, "warning");
+		return;
+	}
+	const selected = await ctx.ui.select(hint ? `C-x → /${hint}*` : "C-x → command palette", options);
+	if (!selected) return;
+	// The selected text is placed in the editor instead of sent as an extension
+	// message: pressing Enter uses pi's interactive dispatcher for built-ins.
+	ctx.ui.setEditorText(selected.split(" - ")[0]);
+	ctx.ui.notify("Command loaded — press Enter to run it", "info");
 }
