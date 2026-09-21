@@ -67,6 +67,45 @@ const CHORD_HELP: Array<{ key: string; label: string; command?: string }> = [
 	{ key: "?", label: "Show this searchable chord list" },
 ];
 
+const ALT_HELP: Array<[string, string]> = [
+	["Alt+]", "Next model (your override)"],
+	["Alt+[", "Previous model (your override)"],
+	["Alt+Z", "Toggle thinking output (used by C-x z)"],
+	["Alt+O", "Toggle tool output (used by C-x o)"],
+	["Alt+Q", "Queue follow-up message"],
+	["Alt+W", "Restore queued message to editor"],
+];
+
+const CTRL_HELP: Array<[string, string]> = [
+	["Ctrl+A / Ctrl+E", "Move to line start / end"],
+	["Ctrl+B / Ctrl+F", "Move cursor left / right"],
+	["Ctrl+Left / Ctrl+Right", "Move one word"],
+	["Ctrl+Home / Ctrl+End", "Move to editor start / end"],
+	["Ctrl+PageUp / Ctrl+PageDown", "Scroll editor by page"],
+	["Ctrl+]", "Jump forward to character"],
+	["Ctrl+Alt+]", "Jump backward to character"],
+	["Ctrl+D", "Delete forward; exit when editor is empty"],
+	["Ctrl+W", "Delete previous word"],
+	["Ctrl+U / Ctrl+K", "Delete to line start / end"],
+	["Ctrl+Y", "Yank most recently deleted text"],
+	["Ctrl+-", "Undo"],
+	["Ctrl+J", "Insert newline"],
+	["Ctrl+C", "Copy selection; clear/exit when none"],
+	["Ctrl+G", "Open external editor"],
+	["Ctrl+L", "Open model selector"],
+	["Ctrl+P", "Next model by default; customized locally"],
+	["Ctrl+Shift+P", "Previous model by default; overridden by Alt+["],
+	["Ctrl+S", "Save selection/default inside model and thinking pickers"],
+	["Ctrl+T", "Toggle thinking by default; overridden by Alt+Z"],
+	["Ctrl+O", "Toggle tools by default; overridden by Alt+O"],
+	["Ctrl+Q", "Follow-up on WSL by default; overridden by Alt+Q"],
+	["Ctrl+V", "Paste clipboard by default; WSL uses Alt+V"],
+	["Ctrl+Z", "Suspend by default; disabled locally"],
+	["Ctrl+X", "Copy by default; disabled and replaced by this chord prefix"],
+	["Ctrl+Up / Ctrl+Down", "Previous / next prompt in fullscreen"],
+	["Ctrl+Shift+F", "Search fullscreen transcript"],
+];
+
 const STATUS_KEY = "pi-chords";
 
 export default function (pi: ExtensionAPI) {
@@ -176,14 +215,25 @@ export default function (pi: ExtensionAPI) {
 }
 
 async function showChordHelp(ctx: any): Promise<void> {
-	const rows = CHORD_HELP.map(
-		(entry) => `C-x ${entry.key.padEnd(2)}  ${entry.label}${entry.command ? `  ${entry.command}` : ""}`,
+	const chordRows = new Map(
+		CHORD_HELP.map((entry) => [
+			`C-x ${entry.key.padEnd(2)}  ${entry.label}${entry.command ? `  ${entry.command}` : ""}`,
+			entry,
+		]),
 	);
-	const selected = await ctx.ui.select("Ctrl+X commands — type to search", rows);
-	if (!selected) return;
-	const entry = CHORD_HELP[rows.indexOf(selected)];
+	const rows = [
+		"── Ctrl+X commands ──",
+		...chordRows.keys(),
+		"── Remaining Alt shortcuts ──",
+		...ALT_HELP.map(([key, label]) => `${key.padEnd(22)}  ${label}`),
+		"── Pi default Ctrl shortcuts (context-dependent) ──",
+		...CTRL_HELP.map(([key, label]) => `${key.padEnd(28)}  ${label}`),
+	];
+	const selected = await ctx.ui.select("Keyboard map — type to search", rows);
+	if (!selected || selected.startsWith("──")) return;
+	const entry = chordRows.get(selected);
 	if (!entry?.command) {
-		ctx.ui.notify(`${selected.trim()} — use that chord to run it`, "info");
+		ctx.ui.notify(`${selected.trim()} — reference entry`, "info");
 		return;
 	}
 	ctx.ui.setEditorText(entry.command);
