@@ -36,6 +36,7 @@ Pi packages execute code with the user's permissions. Review extensions before i
 | `C-x c` | Copy last assistant message |
 | `C-x C` | Clone session |
 | `C-x p` | Compact context |
+| `C-x P` | Ponytail mode picker, when installed |
 | `C-x u` | Usage overlay, when installed |
 | `C-x k` | Keybindings overlay, when installed |
 | `C-x g` | Skill groups, when installed |
