@@ -14,6 +14,7 @@ import { matchesKey, type KeyId } from "@earendil-works/pi-tui";
 
 const DEFAULT_COMMAND_CHORDS: Array<[KeyId, string]> = [
 	["m", "/model"],
+	[",", "/model-default"],
 	["shift+m", "/scoped-models"],
 	["t", "/thinking"],
 	["n", "/new"],
@@ -64,6 +65,7 @@ const PREFILL_CHORDS: Array<[KeyId, string]> = [["shift+d", "/cd "]];
 
 const CHORD_HELP: Array<{ key: string; label: string; command?: string }> = [
 	{ key: "m", label: "Model picker", command: "/model" },
+	{ key: ",", label: "Set default model", command: "/model-default" },
 	{ key: "M", label: "Scoped models", command: "/scoped-models" },
 	{ key: "t", label: "Thinking level", command: "/thinking" },
 	{ key: "o", label: "Toggle tool output" },
@@ -279,6 +281,7 @@ function loadCommandChords(): { commandChords: Array<[KeyId, string]>; configErr
 function toKeyId(key: string): KeyId | undefined {
 	if (/^[a-z0-9]$/.test(key)) return key as KeyId;
 	if (/^[A-Z]$/.test(key)) return `shift+${key.toLowerCase()}` as KeyId;
+	if (key === ",") return key as KeyId;
 	return undefined;
 }
 
