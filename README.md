@@ -2,7 +2,7 @@
 
 An Emacs-style `Ctrl+X` command prefix for the [Pi coding agent](https://github.com/badlogic/pi-mono).
 
-Press `Ctrl+X`, then a second key. Pi highlights the prompt borders while waiting. Any text already in the prompt is restored after a command chord runs. Press `Escape` or `Ctrl+X` again to cancel. `Ctrl+X ?` opens a searchable, scrollable reference containing the configured chords and the remaining Alt/default Ctrl shortcuts.
+Press `Ctrl+X`, then a second key. Pi highlights the prompt borders while waiting. Any text already in the prompt is restored after a command chord runs. Press `Escape` or `Ctrl+X` again to cancel. `Ctrl+X ?` opens a centered overlay with three tab pages — Ctrl+X chords, Alt+ shortcuts, and native Pi commands — that you switch with Tab / Shift+Tab and filter with the fuzzy search bar. Press Enter to load the selected command into the editor.
 
 ## Install
 
@@ -47,7 +47,7 @@ Pi packages execute code with the user's permissions. Review extensions before i
 | `C-x D` | Prefill `/cd ` |
 | `C-x e` | Export session |
 | `C-x q` | Quit Pi |
-| `C-x ?` | Searchable shortcut reference |
+| `C-x ?` | Paged, fuzzy-searchable shortcut overlay |
 
 Optional extension commands are checked at runtime. Missing commands are marked `[not installed]` and are never sent to the model.
 

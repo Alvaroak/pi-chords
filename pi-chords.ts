@@ -9,8 +9,16 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { CustomEditor, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { matchesKey, type KeyId } from "@earendil-works/pi-tui";
+import { CustomEditor, DynamicBorder, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+	fuzzyFilter,
+	Input,
+	matchesKey,
+	truncateToWidth,
+	visibleWidth,
+	type Focusable,
+	type KeyId,
+} from "@earendil-works/pi-tui";
 
 const DEFAULT_COMMAND_CHORDS: Array<[KeyId, string]> = [
 	["m", "/model"],
@@ -98,36 +106,6 @@ const ALT_HELP: Array<[string, string]> = [
 	["Alt+O", "Toggle tool output (used by C-x o)"],
 	["Alt+Q", "Queue follow-up message"],
 	["Alt+W", "Restore queued message to editor"],
-];
-
-const CTRL_HELP: Array<[string, string]> = [
-	["Ctrl+A / Ctrl+E", "Move to line start / end"],
-	["Ctrl+B / Ctrl+F", "Move cursor left / right"],
-	["Ctrl+Left / Ctrl+Right", "Move one word"],
-	["Ctrl+Home / Ctrl+End", "Move to editor start / end"],
-	["Ctrl+PageUp / Ctrl+PageDown", "Scroll editor by page"],
-	["Ctrl+]", "Jump forward to character"],
-	["Ctrl+Alt+]", "Jump backward to character"],
-	["Ctrl+D", "Delete forward; exit when editor is empty"],
-	["Ctrl+W", "Delete previous word"],
-	["Ctrl+U / Ctrl+K", "Delete to line start / end"],
-	["Ctrl+Y", "Yank most recently deleted text"],
-	["Ctrl+-", "Undo"],
-	["Ctrl+J", "Insert newline"],
-	["Ctrl+C", "Copy selection; clear/exit when none"],
-	["Ctrl+G", "Open external editor"],
-	["Ctrl+L", "Open model selector"],
-	["Ctrl+P", "Next model by default; customized locally"],
-	["Ctrl+Shift+P", "Previous model by default; overridden by Alt+["],
-	["Ctrl+S", "Save selection/default inside model and thinking pickers"],
-	["Ctrl+T", "Toggle thinking by default; overridden by Alt+Z"],
-	["Ctrl+O", "Toggle tools by default; overridden by Alt+O"],
-	["Ctrl+Q", "Follow-up on WSL by default; overridden by Alt+Q"],
-	["Ctrl+V", "Paste clipboard by default; WSL uses Alt+V"],
-	["Ctrl+Z", "Suspend by default; disabled locally"],
-	["Ctrl+X", "Copy by default; disabled and replaced by this chord prefix"],
-	["Ctrl+Up / Ctrl+Down", "Previous / next prompt in fullscreen"],
-	["Ctrl+Shift+F", "Search fullscreen transcript"],
 ];
 
 const STATUS_KEY = "pi-chords";
@@ -301,45 +279,228 @@ function isCommandAvailable(pi: ExtensionAPI, command: string): boolean {
 	return BUILTIN_COMMANDS.has(name) || pi.getCommands().some((candidate) => candidate.name === name);
 }
 
+type HelpItem = { primary: string; label: string; command?: string; unavailable?: boolean };
+type HelpPage = { title: string; items: HelpItem[]; empty: string };
+
+function buildPages(pi: ExtensionAPI, commandChords: Array<[KeyId, string]>): HelpPage[] {
+	const configured = new Map(commandChords.map(([key, command]) => [displayKey(key), command]));
+	const chordHelp = CHORD_HELP.filter(
+		(entry) => !entry.command || configured.get(entry.key) === entry.command,
+	);
+	for (const [key, command] of configured) {
+		if (!chordHelp.some((entry) => entry.key === key)) {
+			chordHelp.push({ key, label: "Custom command", command });
+		}
+	}
+	const chordItems: HelpItem[] = chordHelp.map((entry) => ({
+		primary: `C-x ${entry.key}`,
+		label: entry.label,
+		command: entry.command,
+		unavailable: entry.command ? !isCommandAvailable(pi, entry.command) : false,
+	}));
+
+	const altItems: HelpItem[] = ALT_HELP.map(([primary, label]) => ({ primary, label }));
+
+	const commandMap = new Map<string, HelpItem>();
+	for (const name of BUILTIN_COMMANDS) {
+		commandMap.set(name, { primary: `/${name}`, label: "", command: `/${name}` });
+	}
+	for (const command of pi.getCommands()) {
+		commandMap.set(command.name, {
+			primary: `/${command.name}`,
+			label: command.description ?? "",
+			command: `/${command.name}`,
+		});
+	}
+	const commandItems: HelpItem[] = [...commandMap.values()].sort((a, b) =>
+		a.primary.localeCompare(b.primary),
+	);
+
+	return [
+		{ title: "Ctrl+X", items: chordItems, empty: "No chords match" },
+		{ title: "Alt+", items: altItems, empty: "No shortcuts match" },
+		{ title: "Pi commands", items: commandItems, empty: "No commands match" },
+	];
+}
+
+function searchText(item: HelpItem): string {
+	return `${item.primary} ${item.label} ${item.command ?? ""}`;
+}
+
+// Centered overlay with three tab pages (Ctrl+X / Alt+ / Pi commands), Tab and
+// Shift+Tab to switch pages, a fuzzy search bar, and Enter to load the selected
+// command into the editor.
+class ChordHelpOverlay implements Focusable {
+	private pageIndex = 0;
+	private selected = 0;
+	private scroll = 0;
+	private filtered: HelpItem[] = [];
+	private readonly search = new Input({ placeholder: "search…" });
+	private readonly maxVisible = 10;
+	private _focused = false;
+	private readonly pages: HelpPage[];
+	private readonly theme: any;
+	private readonly onPick: (command: string) => void;
+	private readonly onClose: () => void;
+
+	constructor(
+		pages: HelpPage[],
+		theme: any,
+		onPick: (command: string) => void,
+		onClose: () => void,
+	) {
+		this.pages = pages;
+		this.theme = theme;
+		this.onPick = onPick;
+		this.onClose = onClose;
+		this.applyFilter();
+	}
+
+	get focused(): boolean {
+		return this._focused;
+	}
+	set focused(value: boolean) {
+		this._focused = value;
+		this.search.focused = value;
+	}
+
+	private applyFilter(): void {
+		const query = this.search.getValue().trim();
+		const items = this.pages[this.pageIndex]!.items;
+		this.filtered = query ? fuzzyFilter(items, query, searchText) : items;
+		if (this.selected >= this.filtered.length) this.selected = Math.max(0, this.filtered.length - 1);
+		this.clampScroll();
+	}
+
+	private clampScroll(): void {
+		if (this.selected < this.scroll) this.scroll = this.selected;
+		else if (this.selected >= this.scroll + this.maxVisible)
+			this.scroll = this.selected - this.maxVisible + 1;
+	}
+
+	private switchPage(delta: number): void {
+		this.pageIndex = (this.pageIndex + delta + this.pages.length) % this.pages.length;
+		this.selected = 0;
+		this.scroll = 0;
+		this.search.setValue("");
+		this.applyFilter();
+	}
+
+	handleInput(data: string): void {
+		if (matchesKey(data, "escape")) return this.onClose();
+		if (matchesKey(data, "tab")) return this.switchPage(1);
+		if (matchesKey(data, "shift+tab")) return this.switchPage(-1);
+		if (matchesKey(data, "up") || matchesKey(data, "ctrl+p")) {
+			if (this.selected > 0) this.selected--;
+			return this.clampScroll();
+		}
+		if (matchesKey(data, "down") || matchesKey(data, "ctrl+n")) {
+			if (this.selected < this.filtered.length - 1) this.selected++;
+			return this.clampScroll();
+		}
+		if (matchesKey(data, "enter")) return this.choose();
+		// Everything else edits the search field, then re-filters.
+		this.search.handleInput(data);
+		this.applyFilter();
+	}
+
+	private choose(): void {
+		const item = this.filtered[this.selected];
+		if (item?.command && !item.unavailable) this.onPick(item.command);
+	}
+
+	invalidate(): void {
+		this.search.invalidate();
+	}
+
+	render(width: number): string[] {
+		const t = this.theme;
+		const pad = (s: string) => truncateToWidth(s, width - 2, "").padEnd(width - 2);
+		const tabs = this.pages
+			.map((page, i) =>
+				i === this.pageIndex
+					? t.bg("selectedBg", t.fg("accent", t.bold(` ${page.title} `)))
+					: t.fg("muted", ` ${page.title} `),
+			)
+			.join(t.fg("dim", "│"));
+		const lines: string[] = [];
+		lines.push(` ${tabs}`);
+		lines.push(" " + this.search.render(width - 3)[0]!);
+		lines.push(t.fg("dim", "─".repeat(width)));
+
+		if (this.filtered.length === 0) {
+			lines.push(" " + t.fg("warning", this.pages[this.pageIndex]!.empty));
+		} else {
+			const end = Math.min(this.scroll + this.maxVisible, this.filtered.length);
+			const primaryWidth = Math.min(
+				16,
+				Math.max(...this.filtered.slice(this.scroll, end).map((i) => visibleWidth(i.primary))),
+			);
+			for (let i = this.scroll; i < end; i++) {
+				const item = this.filtered[i]!;
+				const selected = i === this.selected;
+				const primary = item.primary.padEnd(primaryWidth);
+				const tail = item.unavailable ? "  [not installed]" : "";
+				const rowText = pad(`${selected ? "▸ " : "  "}${primary}  ${item.label}${tail}`);
+				if (selected) lines.push(" " + t.bg("selectedBg", t.fg("accent", rowText)));
+				else {
+					const tone = item.command && !item.unavailable ? "text" : "muted";
+					lines.push(" " + t.fg(tone, rowText));
+				}
+			}
+			if (this.filtered.length > this.maxVisible) {
+				lines.push(" " + t.fg("dim", `${this.selected + 1}/${this.filtered.length}`));
+			}
+		}
+		lines.push(t.fg("dim", "─".repeat(width)));
+		lines.push(" " + t.fg("dim", "tab/shift-tab pages • ↑↓ select • enter load • esc close"));
+		return lines.map((line) => truncateToWidth(line, width));
+	}
+}
+
 async function showChordHelp(
 	ctx: any,
 	pi: ExtensionAPI,
 	commandChords: Array<[KeyId, string]>,
 ): Promise<void> {
-	const configured = new Map(commandChords.map(([key, command]) => [displayKey(key), command]));
-	const help = CHORD_HELP.filter((entry) => !entry.command || configured.get(entry.key) === entry.command);
-	for (const [key, command] of configured) {
-		if (!help.some((entry) => entry.key === key)) help.push({ key, label: "Custom command", command });
-	}
-	const chordRows = new Map(
-		help.map((entry) => {
-			const unavailable = entry.command && !isCommandAvailable(pi, entry.command) ? "  [not installed]" : "";
-			return [
-				`C-x ${entry.key.padEnd(2)}  ${entry.label}${entry.command ? `  ${entry.command}` : ""}${unavailable}`,
-				entry,
-			] as const;
-		}),
+	const pages = buildPages(pi, commandChords);
+	const command = await ctx.ui.custom(
+		(tui: any, theme: any, _kb: any, done: (value: string | null) => void) => {
+			const top = new DynamicBorder((s: string) => theme.fg("accent", s));
+			const bottom = new DynamicBorder((s: string) => theme.fg("accent", s));
+			const overlay = new ChordHelpOverlay(
+				pages,
+				theme,
+				(picked) => done(picked),
+				() => done(null),
+			);
+			return {
+				get focused() {
+					return overlay.focused;
+				},
+				set focused(value: boolean) {
+					overlay.focused = value;
+				},
+				render: (w: number) => [...top.render(w), ...overlay.render(w), ...bottom.render(w)],
+				invalidate: () => {
+					top.invalidate();
+					bottom.invalidate();
+					overlay.invalidate();
+				},
+				handleInput: (data: string) => {
+					overlay.handleInput(data);
+					tui.requestRender();
+				},
+			};
+		},
+		{ overlay: true, overlayOptions: { anchor: "center", width: "70%", minWidth: 54, maxHeight: "85%" } },
 	);
-	const rows = [
-		"── Ctrl+X commands ──",
-		...chordRows.keys(),
-		"── Remaining Alt shortcuts ──",
-		...ALT_HELP.map(([key, label]) => `${key.padEnd(22)}  ${label}`),
-		"── Pi default Ctrl shortcuts (context-dependent) ──",
-		...CTRL_HELP.map(([key, label]) => `${key.padEnd(28)}  ${label}`),
-	];
-	const selected = await ctx.ui.select("Keyboard map — type to search", rows);
-	if (!selected || selected.startsWith("──")) return;
-	const entry = chordRows.get(selected);
-	if (!entry?.command) {
-		ctx.ui.notify(`${selected.trim()} — reference entry`, "info");
+	if (!command) return;
+	if (!isCommandAvailable(pi, command)) {
+		ctx.ui.notify(`${command} is not installed`, "warning");
 		return;
 	}
-	if (!isCommandAvailable(pi, entry.command)) {
-		ctx.ui.notify(`${entry.command} is not installed`, "warning");
-		return;
-	}
-	ctx.ui.setEditorText(entry.command);
+	ctx.ui.setEditorText(command);
 	ctx.ui.notify("Command loaded — press Enter to run it", "info");
 }
 
