@@ -229,9 +229,9 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_start", (_event, ctx) => {
-		// Let later session-start handlers install their editors first. This keeps
-		// the pending-border wrapper when pi-centered-slash-menu is also loaded.
-		queueMicrotask(() => {
+		// Let every session-start handler install its editor first. This keeps the
+		// pending-border wrapper when pi-centered-slash-menu is also loaded.
+		setTimeout(() => {
 			const previous = ctx.ui.getEditorComponent();
 			ctx.ui.setEditorComponent((tui, theme, keybindings) => {
 				const editor = previous
