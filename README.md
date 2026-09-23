@@ -2,19 +2,19 @@
 
 An Emacs-style `Ctrl+X` command prefix for the [Pi coding agent](https://github.com/badlogic/pi-mono).
 
-Press `Ctrl+X`, then a second key. Pi highlights the prompt borders while waiting. Any text already in the prompt is restored after a command chord runs. Press `Escape` or `Ctrl+X` again to cancel. `Ctrl+X ?` opens a centered overlay with three tab pages — Ctrl+X chords, Alt+ shortcuts, and native Pi commands — that you switch with Tab / Shift+Tab and filter with the fuzzy search bar. Press Enter to load the selected command into the editor.
+Press `Ctrl+X`, then a second key. Pi highlights the prompt borders while waiting. Any text already in the prompt is restored after a command chord runs. Press `Escape` or `Ctrl+X` again to cancel. `Ctrl+X ?` opens a centered, bordered overlay with four tab pages — Ctrl+X chords, Alt+ shortcuts, Ctrl defaults, and native Pi commands — that you switch with Tab / Shift+Tab and filter with the fuzzy search bar. Press Enter to load the selected command into the editor.
 
 ## Install
 
 ```bash
 # Git repository (recommended)
-pi install git:github.com/Alvaroak/pi-chords@v0.2.0
+pi install git:github.com/Alvaroak/pi-chords@v0.3.0
 
 # Local checkout
 pi install /absolute/path/to/pi-chords
 
 # npm, once published
-pi install npm:@alvaroak/pi-chords@0.2.0
+pi install npm:@alvaroak/pi-chords@0.3.0
 ```
 
 Pi packages execute code with the user's permissions. Review extensions before installing them.

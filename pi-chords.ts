@@ -9,7 +9,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { CustomEditor, DynamicBorder, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { CustomEditor, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	fuzzyFilter,
 	Input,
@@ -106,6 +106,36 @@ const ALT_HELP: Array<[string, string]> = [
 	["Alt+O", "Toggle tool output (used by C-x o)"],
 	["Alt+Q", "Queue follow-up message"],
 	["Alt+W", "Restore queued message to editor"],
+];
+
+const CTRL_HELP: Array<[string, string]> = [
+	["Ctrl+A / Ctrl+E", "Move to line start / end"],
+	["Ctrl+B / Ctrl+F", "Move cursor left / right"],
+	["Ctrl+Left / Ctrl+Right", "Move one word"],
+	["Ctrl+Home / Ctrl+End", "Move to editor start / end"],
+	["Ctrl+PageUp / Ctrl+PageDown", "Scroll editor by page"],
+	["Ctrl+]", "Jump forward to character"],
+	["Ctrl+Alt+]", "Jump backward to character"],
+	["Ctrl+D", "Delete forward; exit when editor is empty"],
+	["Ctrl+W", "Delete previous word"],
+	["Ctrl+U / Ctrl+K", "Delete to line start / end"],
+	["Ctrl+Y", "Yank most recently deleted text"],
+	["Ctrl+-", "Undo"],
+	["Ctrl+J", "Insert newline"],
+	["Ctrl+C", "Copy selection; clear/exit when none"],
+	["Ctrl+G", "Open external editor"],
+	["Ctrl+L", "Open model selector"],
+	["Ctrl+P", "Next model by default; customized locally"],
+	["Ctrl+Shift+P", "Previous model by default; overridden by Alt+["],
+	["Ctrl+S", "Save selection/default inside model and thinking pickers"],
+	["Ctrl+T", "Toggle thinking by default; overridden by Alt+Z"],
+	["Ctrl+O", "Toggle tools by default; overridden by Alt+O"],
+	["Ctrl+Q", "Follow-up on WSL by default; overridden by Alt+Q"],
+	["Ctrl+V", "Paste clipboard by default; WSL uses Alt+V"],
+	["Ctrl+Z", "Suspend by default; disabled locally"],
+	["Ctrl+X", "Copy by default; disabled and replaced by this chord prefix"],
+	["Ctrl+Up / Ctrl+Down", "Previous / next prompt in fullscreen"],
+	["Ctrl+Shift+F", "Search fullscreen transcript"],
 ];
 
 const STATUS_KEY = "pi-chords";
@@ -300,6 +330,7 @@ function buildPages(pi: ExtensionAPI, commandChords: Array<[KeyId, string]>): He
 	}));
 
 	const altItems: HelpItem[] = ALT_HELP.map(([primary, label]) => ({ primary, label }));
+	const ctrlItems: HelpItem[] = CTRL_HELP.map(([primary, label]) => ({ primary, label }));
 
 	const commandMap = new Map<string, HelpItem>();
 	for (const name of BUILTIN_COMMANDS) {
@@ -319,6 +350,7 @@ function buildPages(pi: ExtensionAPI, commandChords: Array<[KeyId, string]>): He
 	return [
 		{ title: "Ctrl+X", items: chordItems, empty: "No chords match" },
 		{ title: "Alt+", items: altItems, empty: "No shortcuts match" },
+		{ title: "Ctrl", items: ctrlItems, empty: "No shortcuts match" },
 		{ title: "Pi commands", items: commandItems, empty: "No commands match" },
 	];
 }
@@ -415,21 +447,45 @@ class ChordHelpOverlay implements Focusable {
 
 	render(width: number): string[] {
 		const t = this.theme;
-		const pad = (s: string) => truncateToWidth(s, width - 2, "").padEnd(width - 2);
+		const border = (s: string) => t.fg("border", s);
+		const inner = Math.max(1, width - 2); // columns between the two vertical borders
+		const px = 1; // horizontal padding inside the borders
+		const contentW = Math.max(1, inner - px * 2);
+		// Frame every content line: │ + padding + content (padded to contentW) + padding + │.
+		const box = (content: string, style?: (s: string) => string): string => {
+			const text = truncateToWidth(content, contentW, "");
+			const padded = text + " ".repeat(Math.max(0, contentW - visibleWidth(text)));
+			const body = " ".repeat(px) + padded + " ".repeat(px);
+			return border("│") + (style ? style(body) : body) + border("│");
+		};
+		const rule = (left: string, right: string) => border(left + "─".repeat(inner) + right);
+
+		const page = this.pages[this.pageIndex]!;
 		const tabs = this.pages
-			.map((page, i) =>
+			.map((p, i) =>
 				i === this.pageIndex
-					? t.bg("selectedBg", t.fg("accent", t.bold(` ${page.title} `)))
-					: t.fg("muted", ` ${page.title} `),
+					? t.bg("selectedBg", t.fg("accent", t.bold(` ${p.title} `)))
+					: t.fg("muted", ` ${p.title} `),
 			)
-			.join(t.fg("dim", "│"));
+			.join(t.fg("dim", "·"));
+
+		const label = "Search ";
+		const countStr = ` ${this.filtered.length}/${page.items.length}`;
+		const inputW = Math.max(1, contentW - visibleWidth(label) - visibleWidth(countStr));
+		const searchLine = this.search.render(inputW)[0] ?? "";
+		const gap = Math.max(0, contentW - visibleWidth(label) - inputW - visibleWidth(countStr));
+		const searchContent =
+			t.fg("muted", label) + searchLine + " ".repeat(gap) + t.fg("dim", countStr);
+
 		const lines: string[] = [];
-		lines.push(` ${tabs}`);
-		lines.push(" " + this.search.render(width - 3)[0]!);
-		lines.push(t.fg("dim", "─".repeat(width)));
+		lines.push(rule("╭", "╮"));
+		lines.push(box(tabs));
+		lines.push(rule("├", "┤"));
+		lines.push(box(searchContent));
+		lines.push(rule("├", "┤"));
 
 		if (this.filtered.length === 0) {
-			lines.push(" " + t.fg("warning", this.pages[this.pageIndex]!.empty));
+			lines.push(box(t.fg("warning", page.empty)));
 		} else {
 			const end = Math.min(this.scroll + this.maxVisible, this.filtered.length);
 			const primaryWidth = Math.min(
@@ -441,19 +497,17 @@ class ChordHelpOverlay implements Focusable {
 				const selected = i === this.selected;
 				const primary = item.primary.padEnd(primaryWidth);
 				const tail = item.unavailable ? "  [not installed]" : "";
-				const rowText = pad(`${selected ? "▸ " : "  "}${primary}  ${item.label}${tail}`);
-				if (selected) lines.push(" " + t.bg("selectedBg", t.fg("accent", rowText)));
+				const rowText = `${selected ? "▸ " : "  "}${primary}  ${item.label}${tail}`;
+				if (selected) lines.push(box(rowText, (s) => t.bg("selectedBg", t.fg("accent", s))));
 				else {
 					const tone = item.command && !item.unavailable ? "text" : "muted";
-					lines.push(" " + t.fg(tone, rowText));
+					lines.push(box(rowText, (s) => t.fg(tone, s)));
 				}
 			}
-			if (this.filtered.length > this.maxVisible) {
-				lines.push(" " + t.fg("dim", `${this.selected + 1}/${this.filtered.length}`));
-			}
 		}
-		lines.push(t.fg("dim", "─".repeat(width)));
-		lines.push(" " + t.fg("dim", "tab/shift-tab pages • ↑↓ select • enter load • esc close"));
+		lines.push(rule("├", "┤"));
+		lines.push(box(t.fg("dim", "tab/⇧tab pages · ↑↓ select · enter load · esc close")));
+		lines.push(rule("╰", "╯"));
 		return lines.map((line) => truncateToWidth(line, width));
 	}
 }
@@ -466,8 +520,6 @@ async function showChordHelp(
 	const pages = buildPages(pi, commandChords);
 	const command = await ctx.ui.custom(
 		(tui: any, theme: any, _kb: any, done: (value: string | null) => void) => {
-			const top = new DynamicBorder((s: string) => theme.fg("accent", s));
-			const bottom = new DynamicBorder((s: string) => theme.fg("accent", s));
 			const overlay = new ChordHelpOverlay(
 				pages,
 				theme,
@@ -481,12 +533,8 @@ async function showChordHelp(
 				set focused(value: boolean) {
 					overlay.focused = value;
 				},
-				render: (w: number) => [...top.render(w), ...overlay.render(w), ...bottom.render(w)],
-				invalidate: () => {
-					top.invalidate();
-					bottom.invalidate();
-					overlay.invalidate();
-				},
+				render: (w: number) => overlay.render(w),
+				invalidate: () => overlay.invalidate(),
 				handleInput: (data: string) => {
 					overlay.handleInput(data);
 					tui.requestRender();
