@@ -2,7 +2,7 @@
 
 An Emacs-style `Ctrl+X` command prefix for the [Pi coding agent](https://github.com/badlogic/pi-mono).
 
-Press `Ctrl+X`, then a second key. Pi highlights the prompt borders while waiting. Press `Escape` or `Ctrl+X` again to cancel. `Ctrl+X ?` opens a searchable, scrollable reference containing the configured chords and the remaining Alt/default Ctrl shortcuts.
+Press `Ctrl+X`, then a second key. Pi highlights the prompt borders while waiting. Any text already in the prompt is restored after a command chord runs. Press `Escape` or `Ctrl+X` again to cancel. `Ctrl+X ?` opens a searchable, scrollable reference containing the configured chords and the remaining Alt/default Ctrl shortcuts.
 
 ## Install
 

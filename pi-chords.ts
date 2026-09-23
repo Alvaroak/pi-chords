@@ -146,6 +146,7 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
+			const savedPrompt = ctx.ui.getEditorText();
 			waiting = true;
 			ctx.ui.setStatus(STATUS_KEY, "C-x- waiting for key");
 
@@ -163,6 +164,7 @@ export default function (pi: ExtensionAPI) {
 						return { consume: true };
 					}
 					ctx.ui.setEditorText(command);
+					restorePrompt(ctx, savedPrompt);
 					return { data: "\r" };
 				}
 
@@ -250,6 +252,11 @@ export default function (pi: ExtensionAPI) {
 			});
 		});
 	});
+}
+
+function restorePrompt(ctx: any, prompt: string): void {
+	// Let the synthetic Enter run and clear its command before restoring the draft.
+	setTimeout(() => ctx.ui.setEditorText(prompt), 0);
 }
 
 function loadCommandChords(): { commandChords: Array<[KeyId, string]>; configError?: string } {
