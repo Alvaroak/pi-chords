@@ -229,34 +229,35 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_start", (_event, ctx) => {
-		// Preserve the user's centered-slash/custom editor. This proxy changes
-		// only rendered border glyphs while a chord is pending and forwards every
-		// other property/method to the original editor component.
-		const previous = ctx.ui.getEditorComponent();
-		ctx.ui.setEditorComponent((tui, theme, keybindings) => {
-			const editor = previous
-				? previous(tui, theme, keybindings)
-				: new CustomEditor(tui, theme, keybindings);
-			activeEditor = editor;
-			return new Proxy(editor, {
-				get(target, property, receiver) {
-					if (property === "render") {
-						return (width: number) => {
-							const lines = target.render(width);
-							if (!waiting || lines.length < 2) return lines;
-							const blue = (line: string) =>
-								line.replace(/─+/g, (segment) => ctx.ui.theme.fg("borderAccent", segment));
-							lines[0] = blue(lines[0]!);
-							lines[lines.length - 1] = blue(lines[lines.length - 1]!);
-							return lines;
-						};
-					}
-					const value = Reflect.get(target, property, receiver);
-					return typeof value === "function" ? value.bind(target) : value;
-				},
-				set(target, property, value) {
-					return Reflect.set(target, property, value);
-				},
+		// Let later session-start handlers install their editors first. This keeps
+		// the pending-border wrapper when pi-centered-slash-menu is also loaded.
+		queueMicrotask(() => {
+			const previous = ctx.ui.getEditorComponent();
+			ctx.ui.setEditorComponent((tui, theme, keybindings) => {
+				const editor = previous
+					? previous(tui, theme, keybindings)
+					: new CustomEditor(tui, theme, keybindings);
+				activeEditor = editor;
+				return new Proxy(editor, {
+					get(target, property, receiver) {
+						if (property === "render") {
+							return (width: number) => {
+								const lines = target.render(width);
+								if (!waiting || lines.length < 2) return lines;
+								const blue = (line: string) =>
+									line.replace(/─+/g, (segment) => ctx.ui.theme.fg("borderAccent", segment));
+								lines[0] = blue(lines[0]!);
+								lines[lines.length - 1] = blue(lines[lines.length - 1]!);
+								return lines;
+							};
+						}
+						const value = Reflect.get(target, property, receiver);
+						return typeof value === "function" ? value.bind(target) : value;
+					},
+					set(target, property, value) {
+						return Reflect.set(target, property, value);
+					},
+				});
 			});
 		});
 	});

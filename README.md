@@ -8,13 +8,13 @@ Press `Ctrl+X`, then a second key. Pi highlights the prompt borders while waitin
 
 ```bash
 # Git repository (recommended)
-pi install git:github.com/Alvaroak/pi-chords@v0.3.0
+pi install git:github.com/Alvaroak/pi-chords@v0.3.1
 
 # Local checkout
 pi install /absolute/path/to/pi-chords
 
 # npm, once published
-pi install npm:@alvaroak/pi-chords@0.3.0
+pi install npm:@alvaroak/pi-chords@0.3.1
 ```
 
 Pi packages execute code with the user's permissions. Review extensions before installing them.

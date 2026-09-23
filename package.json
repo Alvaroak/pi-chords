@@ -1,6 +1,6 @@
 {
   "name": "@alvaroak/pi-chords",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A searchable Ctrl+X command prefix for the Pi coding agent",
   "license": "MIT",
   "keywords": [
