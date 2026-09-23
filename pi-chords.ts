@@ -158,6 +158,7 @@ export default function (pi: ExtensionAPI) {
 			waiting = true;
 			ctx.ui.setStatus(STATUS_KEY, "C-x- waiting for key");
 
+			let timeout: ReturnType<typeof setTimeout> | undefined;
 			const unsubscribe = ctx.ui.onTerminalInput((data) => {
 				finish();
 
@@ -205,12 +206,14 @@ export default function (pi: ExtensionAPI) {
 			function finish() {
 				if (!waiting) return;
 				waiting = false;
+				clearTimeout(timeout);
 				ctx.ui.setStatus(STATUS_KEY, undefined);
 				unsubscribe();
 				cancelWait = undefined;
 			}
 
 			cancelWait = finish;
+			timeout = setTimeout(finish, 3_000);
 		},
 	});
 
