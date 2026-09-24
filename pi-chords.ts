@@ -6,8 +6,8 @@
  * terminal-input listener.
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CustomEditor, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
@@ -95,6 +95,7 @@ const CHORD_HELP: Array<{ key: string; label: string; command?: string }> = [
 	{ key: "d", label: "Pick repository", command: "/cdr" },
 	{ key: "D", label: "Change directory", command: "/cd " },
 	{ key: "e", label: "Export session", command: "/export" },
+	{ key: "x", label: "Copy current prompt to clipboard" },
 	{ key: "q", label: "Quit pi", command: "/quit" },
 	{ key: "?", label: "Show this searchable chord list" },
 ];
@@ -185,6 +186,11 @@ export default function (pi: ExtensionAPI) {
 					return { consume: true };
 				}
 
+				if (matchesKey(data, "x")) {
+					void copyToClipboard(pi, ctx, savedPrompt);
+					return { consume: true };
+				}
+
 				const prefill = PREFILL_CHORDS.find(([key]) => matchesKey(data, key))?.[1];
 				if (prefill) {
 					ctx.ui.setEditorText(prefill);
@@ -271,6 +277,28 @@ function restorePrompt(ctx: any, prompt: string): void {
 	setTimeout(() => ctx.ui.setEditorText(prompt), 0);
 }
 
+// Copy the in-progress prompt to the clipboard without disturbing the editor.
+// WSL uses clip.exe (reads stdin); swap for `xclip -selection clipboard` on
+// Linux or `pbcopy` on macOS.
+async function copyToClipboard(pi: ExtensionAPI, ctx: any, text: string): Promise<void> {
+	if (!text) {
+		ctx.ui.notify("Editor is empty — nothing to copy", "warning");
+		return;
+	}
+	const tmp = join(tmpdir(), `pi-chords-clip-${process.pid}-${Date.now()}.txt`);
+	try {
+		writeFileSync(tmp, text, "utf8");
+		const proc = await pi.exec("sh", ["-c", `clip.exe < "${tmp}"`]);
+		ctx.ui.notify(proc.code === 0 ? "Prompt copied to clipboard" : "Clipboard copy failed", proc.code === 0 ? "info" : "warning");
+	} catch (error) {
+		ctx.ui.notify(`Clipboard error: ${error instanceof Error ? error.message : String(error)}`, "warning");
+	} finally {
+		try {
+			unlinkSync(tmp);
+		} catch {}
+	}
+}
+
 function loadCommandChords(): { commandChords: Array<[KeyId, string]>; configError?: string } {
 	const byKey = new Map<string, string>(DEFAULT_COMMAND_CHORDS);
 	const path = join(homedir(), ".pi", "agent", "pi-chords.json");
@@ -279,7 +307,7 @@ function loadCommandChords(): { commandChords: Array<[KeyId, string]>; configErr
 	try {
 		const parsed = JSON.parse(readFileSync(path, "utf8")) as { commands?: Record<string, unknown> };
 		for (const [displayKey, value] of Object.entries(parsed.commands ?? {})) {
-			if (["?", "o", "z", "D"].includes(displayKey)) {
+			if (["?", "o", "z", "D", "x"].includes(displayKey)) {
 				throw new Error(`key "${displayKey}" is reserved by pi-chords`);
 			}
 			const key = toKeyId(displayKey);
@@ -313,6 +341,16 @@ function isCommandAvailable(pi: ExtensionAPI, command: string): boolean {
 	return BUILTIN_COMMANDS.has(name) || pi.getCommands().some((candidate) => candidate.name === name);
 }
 
+// Describe a chord the user remapped: prefer the curated label for that command,
+// then the registered command's own description, then a generic fallback.
+function describeChord(pi: ExtensionAPI, command: string): string {
+	const curated = CHORD_HELP.find((entry) => entry.command === command)?.label;
+	if (curated) return curated;
+	const name = command.slice(1).split(/\s/, 1)[0]!;
+	const registered = pi.getCommands().find((candidate) => candidate.name === name)?.description;
+	return registered || "Custom command";
+}
+
 type HelpItem = { primary: string; label: string; command?: string; unavailable?: boolean };
 type HelpPage = { title: string; items: HelpItem[]; empty: string };
 
@@ -323,7 +361,7 @@ function buildPages(pi: ExtensionAPI, commandChords: Array<[KeyId, string]>): He
 	);
 	for (const [key, command] of configured) {
 		if (!chordHelp.some((entry) => entry.key === key)) {
-			chordHelp.push({ key, label: "Custom command", command });
+			chordHelp.push({ key, label: describeChord(pi, command), command });
 		}
 	}
 	const chordItems: HelpItem[] = chordHelp.map((entry) => ({

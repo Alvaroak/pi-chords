@@ -46,10 +46,11 @@ Pi packages execute code with the user's permissions. Review extensions before i
 | `C-x d` | Repository picker, when installed |
 | `C-x D` | Prefill `/cd ` |
 | `C-x e` | Export session |
+| `C-x x` | Copy the prompt you are writing to the clipboard |
 | `C-x q` | Quit Pi |
 | `C-x ?` | Paged, fuzzy-searchable shortcut overlay |
 
-Optional extension commands are checked at runtime. Missing commands are marked `[not installed]` and are never sent to the model.
+Optional extension commands are checked at runtime. Missing commands are marked `[not installed]` and are never sent to the model. In `C-x ?`, a remapped chord shows its target command's own description instead of a generic label.
 
 ## Customize command chords
 
@@ -58,7 +59,7 @@ Create `~/.pi/agent/pi-chords.json`:
 ```json
 {
   "commands": {
-    "x": "/my-command",
+    "g": "/my-command",
     "m": "/another-model-command",
     "q": null
   }
@@ -68,7 +69,7 @@ Create `~/.pi/agent/pi-chords.json`:
 - A string adds or replaces a chord. It must start with `/`.
 - `null` removes a default chord.
 - Use an uppercase key for a shifted second key, such as `"M"` for `C-x M`; `","` binds `C-x ,`.
-- `C-x ?`, `C-x o`, `C-x z`, and `C-x D` are reserved by the extension.
+- `C-x ?`, `C-x o`, `C-x z`, `C-x D`, and `C-x x` are reserved by the extension.
 - Run `/reload` after changing the file.
 
 ## Local development
