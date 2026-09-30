@@ -8,13 +8,13 @@ Press `Ctrl+X`, then a second key. Pi highlights the prompt borders while waitin
 
 ```bash
 # Git repository (recommended)
-pi install git:github.com/Alvaroak/pi-chords@v0.3.3
+pi install git:github.com/Alvaroak/pi-chords@v0.3.5
 
 # Local checkout
 pi install /absolute/path/to/pi-chords
 
 # npm, once published
-pi install npm:@alvaroak/pi-chords@0.3.3
+pi install npm:@alvaroak/pi-chords@0.3.5
 ```
 
 Pi packages execute code with the user's permissions. Review extensions before installing them.
@@ -36,8 +36,8 @@ Pi packages execute code with the user's permissions. Review extensions before i
 | `C-x f` | Fork session |
 | `C-x c` | Copy last assistant message |
 | `C-x C` | Clone session |
-| `C-x p` | Compact context |
-| `C-x P` | Ponytail mode picker, when installed |
+| `C-x p` | Ponytail mode picker, when installed |
+| `C-x P` | Compact context |
 | `C-x u` | Usage overlay, when installed |
 | `C-x k` | Keybindings overlay, when installed |
 | `C-x g` | Skill groups, when installed |
